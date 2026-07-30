@@ -1,46 +1,66 @@
-# Final irrigation PPO experiment
+# Irrigation PPO Experiment
 
-This directory is the complete, portable entry point for the frozen irrigation experiment. The single workflow notebook is `Irrigation_PPO_Complete_Reproducible.ipynb`. It locates this project root from either this directory or a `notebooks/` launch directory by requiring both authoritative Python modules.
+This folder contains the complete code, data, trained outputs, and analysis for the irrigation PPO project:
 
-## Required contents
+**The Value of Rainfall Forecasts for PPO-Based Irrigation Timing and Field Prioritization**
 
-- `Irrigation_PPO_Complete_Reproducible.ipynb`
-- `irrigation_env.py` — sole authority for dynamics, observations, reward, actions, and masking
-- `experiment_protocol.py` — sole authority for splits, budgets, treatments, seeds, PPO parameters, and the 18-model matrix
-- `data/` — sealed training/development and protected final-holdout weather plus manifests
-- `requirements.txt`
-- `README.md`
+The main workflow is provided in `Irrigation_PPO.ipynb`.
 
-`run_preflight.py` is included and should be run before any long phase. `CPWG_processed.csv` is the unpartitioned source weather supplied with the submission; formal code uses only the two canonical sealed files under `data/`.
+## Project files
 
-## Frozen protocol
+- `Irrigation_PPO.ipynb`  
+  Main notebook containing the experimental workflow, PPO training, evaluation, and result generation.
 
-- Training simyears 1–12; development simyears 13–30; protected final holdout 31–40.
-- Moderate budget 1,800 mm; abundant budget 2,400 mm.
-- No Forecast, Noisy Forecast (2 mm), Perfect Forecast.
-- PPO seeds 0, 1, 2; 18 models total.
-- Irrigation cost 0.16 per irrigated field.
-- Target 150,000 environment steps; exact formal stop 151,200.
-- Batch 2,400; minibatch 240; 10 epochs; learning rate 3e-4; frozen entropy schedule.
-- Development checkpoint evaluation every two iterations; selection uses only mean cumulative reward on simyears 13–30.
+- `irrigation_env.py`  
+  Defines the irrigation environment, including observations, actions, soil-moisture dynamics, reward calculation, and action masking.
 
-## Safe execution order
+- `experiment_protocol.py`  
+  Stores the fixed experimental settings, including weather-year splits, forecast treatments, water budgets, PPO seeds, and training parameters.
 
-1. Create a clean environment and run `python -m pip install -r requirements.txt`.
-2. Run `python run_preflight.py`; require an overall PASS.
-3. Open the notebook, keep all four gates `False`, restart the kernel, and Run All once.
-4. Restart; enable only `RUN_THRESHOLD_OPTIMIZATION`; Run All and verify `outputs/baselines_final_v1/BASELINES_FROZEN.flag`.
-5. Restart; enable only `RUN_FORMAL_TRAINING`; Run All and verify `outputs/formal_ppo_final_v1/FORMAL_18_MODELS_COMPLETE.flag`.
-6. Only after both freezes, restart; enable only `RUN_FINAL_HOLDOUT`; Run All exactly once and verify `outputs/final_holdout_31_40_v1/FINAL_HOLDOUT_COMPLETE.flag`.
-7. Restart; enable only `RUN_FINAL_ANALYSIS`; Run All and verify `outputs/final_analysis_v1/FINAL_ANALYSIS_COMPLETE.flag`.
+- `prepare_weather.ipynb`  
+  Documents the preparation of rainfall and reference evapotranspiration data.
 
-Enable exactly one gate per pass. The protected holdout may not be used to train, tune, select checkpoints, revise thresholds, or modify the protocol.
+- `data/`  
+  Contains the weather data used by the experiment.
 
-## Formal outputs
+- `outputs/`  
+  Contains the saved baseline parameters, PPO checkpoints, holdout evaluation results, and final analysis outputs.
 
-- `outputs/baselines_final_v1/`
-- `outputs/formal_ppo_final_v1/`
-- `outputs/final_holdout_31_40_v1/`
-- `outputs/final_analysis_v1/`
+- `CPWG_processed.csv`  
+  Complete processed weather dataset supplied with the project.
 
-All formal writers use canonical filenames, audit their row counts and invariants, and refuse unsafe overwrite or incomplete resume states.
+- `run_preflight.py`  
+  Performs basic checks before running the experiment.
+
+- `requirements.txt`  
+  Lists the required Python packages.
+
+## Experimental design
+
+The experiment compares three rainfall-forecast treatments:
+
+- No Forecast
+- Noisy three-day Forecast
+- Perfect three-day Forecast
+
+Two seasonal water budgets are considered:
+
+- Moderate: 1,800 mm
+- Abundant: 2,400 mm
+
+The simulated weather years are divided into:
+
+- Training: simyears 1–12
+- Development: simyears 13–30
+- Final holdout: simyears 31–40
+
+Three PPO training seeds are used for each treatment and budget combination, producing 18 PPO models in total.
+
+Each PPO model is trained for a target of 150,000 environment steps. Because complete training batches are used, the actual stopping point is 151,200 steps. Checkpoints are evaluated on the development years, and the checkpoint with the highest mean development reward is selected for final evaluation.
+
+## Running the project
+
+Install the required packages:
+
+```bash
+python -m pip install -r requirements.txt
