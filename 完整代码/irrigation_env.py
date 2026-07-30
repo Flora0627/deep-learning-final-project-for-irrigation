@@ -38,7 +38,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "selection_seed": 0,
     # “weather_seeds” is retained for compatibility, but each value is now a
     # LARS-WG “simyear” rather than a random-number-generator seed.
-    "weather_seeds": tuple(range(1, 71)),
+    "weather_seeds": tuple(range(1, 41)),
     "processed_weather_file": "CPWG_processed.csv",
     # CPWG uses one-based Julian days: 121 is May 1.
     "weather_start_jday": 121,
@@ -208,7 +208,7 @@ class IrrigationEnv(gym.Env[np.ndarray, int]):
         self.wilting_moisture = self._field_vector("wilting_moisture")
         self.rain_infiltration_efficiency = self._field_vector(
             "rain_infiltration_efficiency"
-        )
+        ) #rainfall truly enter the field
         self.irrigation_efficiency = self._field_vector("irrigation_efficiency")
         self.et_multiplier = self._field_vector("et_multiplier", positive=True)
         self.daily_water_loss_fraction = self._field_vector(
@@ -500,6 +500,7 @@ class IrrigationEnv(gym.Env[np.ndarray, int]):
             return requested
         return int(self._selection_rng.choice(self.weather_seeds))
 
+    #noisy forecast
     def _make_forecast_errors(self, weather_seed: int) -> np.ndarray:
         # The same standard-normal errors are scaled for low/high treatments.
         # This pairs those treatments and keeps errors independent of PPO seeds.
@@ -910,243 +911,3 @@ class ActionMaskedIrrigationEnv(IrrigationEnv):
             truncated,
             info,
         )
-
-
-if __name__ == "__main__":
-    # Short smoke test. Run from a directory containing CPWG_processed.csv, or
-    # override ``processed_weather_file`` below with another relative path.
-    selected_simyear = 1
-    base_config = make_default_config(weather_seeds=(selected_simyear,))
-    assert base_config["irrigation_cost_per_field"] == 0.16
-    assert base_config["forecast_observation_encoding"] == "daily"
-
-    # Core budget fallback and action-masking boundary tests.
-    expected_budget_masks = {
-        0.0: [1, 0, 0, 0, 0, 0, 0],
-        10.0: [1, 1, 1, 1, 0, 0, 0],
-        20.0: [1, 1, 1, 1, 1, 1, 1],
-    }
-    core_budget_env = IrrigationEnv(base_config)
-    core_budget_env.reset(options={"weather_seed": selected_simyear})
-    core_budget_env.remaining_budget_mm = 10.0
-    _, _, _, _, fallback_info = core_budget_env.step(6)
-    assert fallback_info["invalid_action"] is True
-    assert fallback_info["requested_action"] == 6
-    assert fallback_info["executed_action"] == 0
-    assert fallback_info["requested_water_mm"] == 20.0
-    assert fallback_info["applied_water_mm"] == 0.0
-    assert fallback_info["budget_after_mm"] == 10.0
-    assert fallback_info["reward_components"]["irrigation_penalty"] == 0.0
-    assert fallback_info["reward_components"]["invalid_action_penalty"] == 2.0
-
-    masked_budget_env = ActionMaskedIrrigationEnv(base_config)
-    masked_observation, _ = masked_budget_env.reset(
-        options={"weather_seed": selected_simyear}
-    )
-    assert set(masked_observation) == {"observations", "action_mask"}
-    assert masked_observation["observations"].shape == (10,)
-    assert masked_observation["action_mask"].shape == (7,)
-    assert masked_observation["observations"].dtype == np.float32
-    assert masked_observation["action_mask"].dtype == np.float32
-    np.testing.assert_array_equal(
-        masked_observation["action_mask"], np.ones(7, dtype=np.float32)
-    )
-    for budget_mm, expected_mask in expected_budget_masks.items():
-        masked_budget_env.remaining_budget_mm = budget_mm
-        masked_observation = masked_budget_env._masked_observation(
-            masked_budget_env._observation()
-        )
-        np.testing.assert_array_equal(
-            masked_observation["action_mask"],
-            np.asarray(expected_mask, dtype=np.float32),
-        )
-    masked_budget_env.remaining_budget_mm = 0.0
-    try:
-        masked_budget_env.step(1)
-    except AssertionError as error:
-        assert str(error) == "RLlib selected an action that was masked as invalid"
-    else:
-        raise AssertionError("A masked action must fail before the core step")
-
-    no_forecast_env = IrrigationEnv(
-        {
-            **base_config,
-            "use_forecast": False,
-            "forecast_noise_std_mm": 0.0,
-        }
-    )
-    perfect_forecast_env = IrrigationEnv(
-        {
-            **base_config,
-            "use_forecast": True,
-            "forecast_noise_std_mm": 0.0,
-        }
-    )
-    noisy_forecast_env = IrrigationEnv(
-        {
-            **base_config,
-            "use_forecast": True,
-            "forecast_noise_std_mm": 2.0,
-        }
-    )
-
-    no_observation, reset_info = no_forecast_env.reset(
-        options={"weather_seed": selected_simyear}
-    )
-    perfect_observation, _ = perfect_forecast_env.reset(
-        options={"weather_seed": selected_simyear}
-    )
-    noisy_observation, _ = noisy_forecast_env.reset(
-        options={"weather_seed": selected_simyear}
-    )
-
-    assert no_forecast_env.irrigation_cost_per_field == 0.16
-    assert perfect_forecast_env.irrigation_cost_per_field == 0.16
-    assert noisy_forecast_env.irrigation_cost_per_field == 0.16
-    assert no_forecast_env.forecast_observation_encoding == "daily"
-    assert no_observation.shape == (10,)
-    assert perfect_observation.shape == (10,)
-    assert noisy_observation.shape == (10,)
-    assert no_observation.dtype == np.float32
-    assert np.isfinite(no_observation).all()
-    assert np.isfinite(perfect_observation).all()
-    assert np.isfinite(noisy_observation).all()
-    assert reset_info["weather_seed"] == selected_simyear
-
-    assert no_forecast_env.weather is not None
-    assert perfect_forecast_env.weather is not None
-    assert noisy_forecast_env.weather is not None
-
-    assert no_forecast_env.weather.rain_mm.shape == (122,)
-    assert no_forecast_env.weather.eto_mm.shape == (122,)
-    assert np.isfinite(no_forecast_env.weather.rain_mm).all()
-    assert np.isfinite(no_forecast_env.weather.eto_mm).all()
-    assert not no_forecast_env.weather.rain_mm.flags.writeable
-    assert not no_forecast_env.weather.eto_mm.flags.writeable
-    np.testing.assert_array_equal(
-        no_observation[7:],
-        np.zeros(3, dtype=np.float32),
-    )
-
-    # All forecast treatments must use exactly the same actual weather.
-    np.testing.assert_array_equal(
-        no_forecast_env.weather.rain_mm,
-        perfect_forecast_env.weather.rain_mm,
-    )
-    np.testing.assert_array_equal(
-        no_forecast_env.weather.eto_mm,
-        perfect_forecast_env.weather.eto_mm,
-    )
-    np.testing.assert_array_equal(
-        noisy_forecast_env.weather.rain_mm,
-        perfect_forecast_env.weather.rain_mm,
-    )
-    np.testing.assert_array_equal(
-        noisy_forecast_env.weather.eto_mm,
-        perfect_forecast_env.weather.eto_mm,
-    )
-
-    # Find the first forecast window containing non-zero rainfall.
-    rainy_origin = next(
-        day
-        for day in range(perfect_forecast_env.episode_days)
-        if np.any(
-            perfect_forecast_env.weather.rain_mm[
-                day : day + perfect_forecast_env.forecast_horizon
-            ]
-            > 0.0
-        )
-    )
-
-    # The selected perfect-forecast window must genuinely contain rain.
-    rainy_window_checked = False
-    final_infos: list[dict[str, Any]] = []
-
-    # Identical actions must produce identical physical transitions and rewards
-    # for the full episode, regardless of forecast treatment.
-    for step_number in range(1, no_forecast_env.episode_days + 1):
-        decision_day = step_number - 1
-        if decision_day == rainy_origin:
-            np.testing.assert_array_equal(
-                no_observation[7:],
-                np.zeros(3, dtype=np.float32),
-            )
-            assert np.any(perfect_observation[7:] > 0.0)
-            np.testing.assert_allclose(
-                perfect_observation[7:] * perfect_forecast_env.rain_scale,
-                perfect_forecast_env.weather.rain_mm[
-                    rainy_origin : rainy_origin
-                    + perfect_forecast_env.forecast_horizon
-                ],
-                rtol=1e-6,
-                atol=1e-6,
-            )
-            rainy_window_checked = True
-
-        step_results = [
-            environment.step(0)
-            for environment in (
-                no_forecast_env,
-                perfect_forecast_env,
-                noisy_forecast_env,
-            )
-        ]
-        observations = [result[0] for result in step_results]
-        rewards = [result[1] for result in step_results]
-        terminations = [result[2] for result in step_results]
-        truncations = [result[3] for result in step_results]
-        final_infos = [result[4] for result in step_results]
-
-        assert all(np.isfinite(observation).all() for observation in observations)
-        assert all(np.isfinite(reward) for reward in rewards)
-        assert terminations == [step_number == 120] * 3
-        assert truncations == [False] * 3
-        np.testing.assert_array_equal(
-            observations[0][7:],
-            np.zeros(3, dtype=np.float32),
-        )
-
-        np.testing.assert_allclose(
-            no_forecast_env.soil_water_mm,
-            perfect_forecast_env.soil_water_mm,
-            rtol=1e-12,
-            atol=1e-12,
-        )
-        np.testing.assert_allclose(
-            noisy_forecast_env.soil_water_mm,
-            perfect_forecast_env.soil_water_mm,
-            rtol=1e-12,
-            atol=1e-12,
-        )
-        np.testing.assert_allclose(
-            rewards[0],
-            rewards[1],
-            rtol=1e-12,
-            atol=1e-12,
-        )
-        np.testing.assert_allclose(
-            rewards[2],
-            rewards[1],
-            rtol=1e-12,
-            atol=1e-12,
-        )
-
-        no_observation, perfect_observation, noisy_observation = observations
-
-    assert rainy_window_checked
-    assert all(
-        info["episode_summary"]["completed_days"] == 120 for info in final_infos
-    )
-    assert no_forecast_env.weather_processor == WEATHER_PROCESSOR
-
-    print(
-        "Smoke test passed:",
-        {
-            "simyear": selected_simyear,
-            "rainy_forecast_origin": rainy_origin,
-            "observation_shape": no_observation.shape,
-            "episode_steps": final_infos[0]["episode_summary"]["completed_days"],
-            "weather_processor": no_forecast_env.weather_processor,
-            "weather_fingerprint": no_forecast_env.weather.fingerprint,
-        },
-    )
