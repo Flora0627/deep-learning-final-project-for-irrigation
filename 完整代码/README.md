@@ -64,3 +64,6 @@ Install the required packages:
 
 ```bash
 python -m pip install -r requirements.txt
+
+## Adaptive Github:
+https://github.com/aquacropos/aquacrop-gym/tree/dea2c42102cb8bb4a417429b2ed3f93c972c281d
