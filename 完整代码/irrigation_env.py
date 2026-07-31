@@ -74,6 +74,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "eto_observation_scale_mm": 8.0,
 }
 
+#Process Model with Aqua Model Function
 PROCESSED_WEATHER_COLUMNS = ("simyear", "jday", "rain_mm", "eto_mm")
 WEATHER_PROCESSOR = "precomputed_aquacropgym_faopm_csv"
 
@@ -592,6 +593,7 @@ class IrrigationEnv(gym.Env[np.ndarray, int]):
         values.extend(self._forecast() / self.rain_scale)
         return np.asarray(values, dtype=np.float32)
 
+#Update to next observation
     def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         if self.weather is None:
             raise RuntimeError("Call reset() before step()")
